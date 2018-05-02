@@ -1,36 +1,79 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-    <PropertyGroup>
-        <TargetFramework>net35</TargetFramework>
-        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Product>Harmony</Product>
-        <Company>Andreas Pardeike</Company>
-        <Copyright>Copyright © 2016</Copyright>
-        <Description>A general non-destructive patch library for .NET and Mono modules</Description>
-        <PackageId>Harmony</PackageId>
-        <Authors>Andreas Pardeike</Authors>
-        <AssemblyName>0Harmony</AssemblyName>
-        <SignAssembly>false</SignAssembly>
-        <Version>1.1.0</Version>
-        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-        <PackageTags>Harmony,Mono,Patch,Patching,Runtime,Detour,Detours,Aspect,Aspects</PackageTags>
-        <Configurations>Debug;Release</Configurations>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-      <DefineConstants>DEBUG;TRACE;NET35</DefineConstants>
-      <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-      <Optimize>false</Optimize>
-      <DebugType>full</DebugType>
-      <DebugSymbols>true</DebugSymbols>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-      <DefineConstants>NET35</DefineConstants>
-      <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-      <Optimize>true</Optimize>
-      <DebugType>none</DebugType>
-      <DebugSymbols>false</DebugSymbols>
-    </PropertyGroup>
-
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{1859537E-CA54-4DB4-BD4D-9CE571DFF02D}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>Harmony</RootNamespace>
+    <AssemblyName>0Harmony</AssemblyName>
+    <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile>Unity Full v3.5</TargetFrameworkProfile>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Attributes.cs" />
+    <Compile Include="CodeInstruction.cs" />
+    <Compile Include="CodeTranspiler.cs" />
+    <Compile Include="Extras\DelegateTypeFactory.cs" />
+    <Compile Include="Extras\FastAccess.cs" />
+    <Compile Include="Extras\MethodInvoker.cs" />
+    <Compile Include="GlobalSuppressions.cs" />
+    <Compile Include="HarmonyInstance.cs" />
+    <Compile Include="HarmonyMethod.cs" />
+    <Compile Include="HarmonySharedState.cs" />
+    <Compile Include="ILCopying\ByteBuffer.cs" />
+    <Compile Include="ILCopying\Emitter.cs" />
+    <Compile Include="ILCopying\ILInstruction.cs" />
+    <Compile Include="ILCopying\Memory.cs" />
+    <Compile Include="ILCopying\MethodCopier.cs" />
+    <Compile Include="ILCopying\Signature.cs" />
+    <Compile Include="MethodPatcher.cs" />
+    <Compile Include="Patch.cs" />
+    <Compile Include="PatchFunctions.cs" />
+    <Compile Include="PatchProcessor.cs" />
+    <Compile Include="Priority.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Tools\AccessCache.cs" />
+    <Compile Include="Tools\AccessTools.cs" />
+    <Compile Include="Tools\DynamicTools.cs" />
+    <Compile Include="Tools\Extensions.cs" />
+    <Compile Include="Tools\FileLog.cs" />
+    <Compile Include="Tools\PatchTools.cs" />
+    <Compile Include="Tools\SelfPatching.cs" />
+    <Compile Include="Tools\SymbolExtensions.cs" />
+    <Compile Include="Tools\Traverse.cs" />
+    <Compile Include="Transpilers.cs" />
+  </ItemGroup>
+  <ItemGroup />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

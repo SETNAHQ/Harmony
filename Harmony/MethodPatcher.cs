@@ -15,6 +15,7 @@ namespace Harmony
 		public static string ORIGINAL_METHOD_PARAM = "__originalMethod";
 		public static string RESULT_VAR = "__result";
 		public static string STATE_VAR = "__state";
+		public static string INSTANCE_FIELD_PREFIX = "___";
 
 		// in case of trouble, set to true to write dynamic method to desktop as a dll
 		// won't work for all methods because of the inability to extend a type compared
@@ -89,10 +90,13 @@ namespace Harmony
 				if (canHaveJump)
 					Emitter.MarkLabel(il, skipOriginalLabel);
 
-				AddPostfixes(il, original, postfixes, privateVars);
+				AddPostfixes(il, original, postfixes, privateVars, false);
 
 				if (resultVariable != null)
 					Emitter.Emit(il, OpCodes.Ldloc, resultVariable);
+
+				AddPostfixes(il, original, postfixes, privateVars, true);
+
 				Emitter.Emit(il, OpCodes.Ret);
 
 				if (HarmonyInstance.DEBUG)
@@ -190,12 +194,20 @@ namespace Harmony
 
 		static MethodInfo getMethodMethod = typeof(MethodBase).GetMethod("GetMethodFromHandle", new[] { typeof(RuntimeMethodHandle) });
 
-		static void EmitCallParameter(ILGenerator il, MethodBase original, MethodInfo patch, Dictionary<string, LocalBuilder> variables)
+		static List<KeyValuePair<LocalBuilder, FieldInfo>> EmitCallParameter(ILGenerator il, MethodBase original, MethodInfo patch, Dictionary<string, LocalBuilder> variables, bool allowFirsParamPassthrough)
 		{
 			var isInstance = original.IsStatic == false;
 			var originalParameters = original.GetParameters();
 			var originalParameterNames = originalParameters.Select(p => p.Name).ToArray();
-			foreach (var patchParam in patch.GetParameters())
+
+			var privateFieldVars = new List<KeyValuePair<LocalBuilder, FieldInfo>>();
+
+			// check for passthrough using first parameter (which must have same type as return type)
+			var parameters = patch.GetParameters().ToList();
+			if (allowFirsParamPassthrough && patch.ReturnType != typeof(void) && parameters.Count > 0 && parameters[0].ParameterType == patch.ReturnType)
+				parameters.RemoveRange(0, 1);
+
+			foreach (var patchParam in parameters)
 			{
 				if (patchParam.Name == ORIGINAL_METHOD_PARAM)
 				{
@@ -225,6 +237,26 @@ namespace Harmony
 						Emitter.Emit(il, OpCodes.Ldarga, 0); // probably won't work or will be useless
 					else
 						Emitter.Emit(il, OpCodes.Ldarg_0);
+					continue;
+				}
+
+				if (patchParam.Name.StartsWith(INSTANCE_FIELD_PREFIX))
+				{
+					var fieldInfo = AccessTools.Field(original.DeclaringType, patchParam.Name.Substring(INSTANCE_FIELD_PREFIX.Length));
+					if (patchParam.ParameterType.IsByRef)
+					{
+						var localVar = DynamicTools.DeclareLocalVariable(il, fieldInfo.FieldType);
+						Emitter.Emit(il, OpCodes.Ldarg_0);
+						Emitter.Emit(il, OpCodes.Ldfld, fieldInfo);
+						Emitter.Emit(il, OpCodes.Stloc, localVar);
+						Emitter.Emit(il, OpCodes.Ldloca, localVar);
+						privateFieldVars.Add(new KeyValuePair<LocalBuilder, FieldInfo>(localVar, fieldInfo));
+					}
+					else
+					{
+						Emitter.Emit(il, OpCodes.Ldarg_0);
+						Emitter.Emit(il, OpCodes.Ldfld, fieldInfo);
+					}
 					continue;
 				}
 
@@ -290,6 +322,8 @@ namespace Harmony
 				Emitter.Emit(il, OpCodes.Ldarg, patchArgIndex);
 				Emitter.Emit(il, LoadIndOpCodeFor(originalParameters[idx].ParameterType));
 			}
+
+			return privateFieldVars;
 		}
 
 		static bool AddPrefixes(ILGenerator il, MethodBase original, List<MethodInfo> prefixes, Dictionary<string, LocalBuilder> variables, Label label)
@@ -297,8 +331,16 @@ namespace Harmony
 			var canHaveJump = false;
 			prefixes.ForEach(fix =>
 			{
-				EmitCallParameter(il, original, fix, variables);
+				var privateFieldVars = EmitCallParameter(il, original, fix, variables, false);
 				Emitter.Emit(il, OpCodes.Call, fix);
+
+				foreach (var privateFieldVar in privateFieldVars)
+				{
+					Emitter.Emit(il, OpCodes.Ldloc, privateFieldVar.Key);
+					Emitter.Emit(il, OpCodes.Ldarg_0);
+					Emitter.Emit(il, OpCodes.Stfld, privateFieldVar.Value);
+				}
+
 				if (fix.ReturnType != typeof(void))
 				{
 					if (fix.ReturnType != typeof(bool))
@@ -310,15 +352,35 @@ namespace Harmony
 			return canHaveJump;
 		}
 
-		static void AddPostfixes(ILGenerator il, MethodBase original, List<MethodInfo> postfixes, Dictionary<string, LocalBuilder> variables)
+		static void AddPostfixes(ILGenerator il, MethodBase original, List<MethodInfo> postfixes, Dictionary<string, LocalBuilder> variables, bool passthroughPatches)
 		{
-			postfixes.ForEach(fix =>
-			{
-				EmitCallParameter(il, original, fix, variables);
-				Emitter.Emit(il, OpCodes.Call, fix);
-				if (fix.ReturnType != typeof(void))
-					throw new Exception("Postfix patch " + fix + " has not \"void\" return type: " + fix.ReturnType);
-			});
+			postfixes
+				.Where(fix => passthroughPatches == (fix.ReturnType != typeof(void)))
+				.Do(fix =>
+				{
+					var privateFieldVars = EmitCallParameter(il, original, fix, variables, true);
+					Emitter.Emit(il, OpCodes.Call, fix);
+
+					foreach (var privateFieldVar in privateFieldVars)
+					{
+						Emitter.Emit(il, OpCodes.Ldloc, privateFieldVar.Key);
+						Emitter.Emit(il, OpCodes.Ldarg_0);
+						Emitter.Emit(il, OpCodes.Stfld, privateFieldVar.Value);
+					}
+
+					if (fix.ReturnType != typeof(void))
+					{
+						var firstFixParam = fix.GetParameters().FirstOrDefault();
+						var hasPassThroughResultParam = firstFixParam != null && fix.ReturnType == firstFixParam.ParameterType;
+						if (!hasPassThroughResultParam)
+						{
+							if (firstFixParam != null)
+								throw new Exception("Return type of postfix patch " + fix + " does match type of its first parameter");
+
+							throw new Exception("Postfix patch " + fix + " must have a \"void\" return type");
+						}
+					}
+				});
 		}
 	}
 }

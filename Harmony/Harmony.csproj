@@ -43,6 +43,7 @@
   <ItemGroup>
     <Compile Include="Attributes.cs" />
     <Compile Include="CodeInstruction.cs" />
+    <Compile Include="CodeMatcher.cs" />
     <Compile Include="CodeTranspiler.cs" />
     <Compile Include="Extras\DelegateTypeFactory.cs" />
     <Compile Include="Extras\FastAccess.cs" />

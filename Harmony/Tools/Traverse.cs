@@ -6,6 +6,26 @@ using System.Runtime.CompilerServices;
 
 namespace Harmony
 {
+	public class Traverse<T>
+	{
+		private Traverse traverse;
+
+		Traverse()
+		{
+		}
+
+		public Traverse(Traverse traverse)
+		{
+			this.traverse = traverse;
+		}
+
+		public T Value
+		{
+			get => traverse.GetValue<T>();
+			set => traverse.SetValue(value);
+		}
+	}
+
 	public class Traverse
 	{
 		static AccessCache Cache;
@@ -118,6 +138,15 @@ namespace Harmony
 			return this;
 		}
 
+		public Type GetValueType()
+		{
+			if (_info is FieldInfo)
+				return ((FieldInfo)_info).FieldType;
+			if (_info is PropertyInfo)
+				return ((PropertyInfo)_info).PropertyType;
+			return null;
+		}
+
 		Traverse Resolve()
 		{
 			if (_root == null && _type != null) return this;
@@ -144,6 +173,11 @@ namespace Harmony
 			return new Traverse(resolved._root, info, null);
 		}
 
+		public Traverse<T> Field<T>(string name)
+		{
+			return new Traverse<T>(Field(name));
+		}
+
 		public List<string> Fields()
 		{
 			var resolved = Resolve();
@@ -158,6 +192,11 @@ namespace Harmony
 			var info = Cache.GetPropertyInfo(resolved._type, name);
 			if (info == null) return new Traverse();
 			return new Traverse(resolved._root, info, index);
+		}
+
+		public Traverse<T> Property<T>(string name, object[] index = null)
+		{
+			return new Traverse<T>(Property(name, index));
 		}
 
 		public List<string> Properties()
@@ -247,6 +286,8 @@ namespace Harmony
 			var targetTrv = Create(target);
 			AccessTools.GetPropertyNames(source).ForEach(f => action(f, sourceTrv.Property(f), targetTrv.Property(f)));
 		}
+
+		public static Action<Traverse, Traverse> CopyFields = (from, to) => { to.SetValue(from.GetValue()); };
 
 		public override string ToString()
 		{

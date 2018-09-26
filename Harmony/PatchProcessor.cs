@@ -140,22 +140,38 @@ namespace Harmony
 			}
 			else
 			{
+				var originalMethodType = containerAttributes.methodType;
+
+				// MethodType default is Normal
+				if (containerAttributes.methodType == null)
+					containerAttributes.methodType = MethodType.Normal;
+
 				var isPatchAll = Attribute.GetCustomAttribute(container, typeof(HarmonyPatchAll)) != null;
 				if (isPatchAll)
 				{
-					var type = containerAttributes.originalType;
+					var type = containerAttributes.declaringType;
 					originals.AddRange(AccessTools.GetDeclaredConstructors(type).Cast<MethodBase>());
 					originals.AddRange(AccessTools.GetDeclaredMethods(type).Cast<MethodBase>());
 				}
 				else
 				{
-					var original = GetOriginalMethod();
+					var original = RunMethod<HarmonyTargetMethod, MethodBase>(null);
+
 					if (original == null)
-						original = RunMethod<HarmonyTargetMethod, MethodBase>(null);
-					if (original != null)
-						originals.Add(original);
-					else
-						throw new ArgumentException("No target method specified for class " + container.FullName);
+						original = GetOriginalMethod();
+
+					if (original == null)
+					{
+						var info = "(";
+						info += "declaringType=" + containerAttributes.declaringType + ", ";
+						info += "methodName =" + containerAttributes.methodName + ", ";
+						info += "methodType=" + originalMethodType + ", ";
+						info += "argumentTypes=" + containerAttributes.argumentTypes.Description();
+						info += ")";
+						throw new ArgumentException("No target method specified for class " + container.FullName + " " + info);
+					}
+
+					originals.Add(original);
 				}
 			}
 
@@ -192,10 +208,35 @@ namespace Harmony
 		MethodBase GetOriginalMethod()
 		{
 			var attr = containerAttributes;
-			if (attr.originalType == null) return null;
-			if (attr.methodName == null)
-				return AccessTools.Constructor(attr.originalType, attr.parameter);
-			return AccessTools.Method(attr.originalType, attr.methodName, attr.parameter);
+			if (attr.declaringType == null) return null;
+
+			switch (attr.methodType)
+			{
+				case MethodType.Normal:
+					if (attr.methodName == null)
+						return null;
+					return AccessTools.DeclaredMethod(attr.declaringType, attr.methodName, attr.argumentTypes);
+
+				case MethodType.Getter:
+					if (attr.methodName == null)
+						return null;
+					return AccessTools.DeclaredProperty(attr.declaringType, attr.methodName).GetGetMethod(true);
+
+				case MethodType.Setter:
+					if (attr.methodName == null)
+						return null;
+					return AccessTools.DeclaredProperty(attr.declaringType, attr.methodName).GetSetMethod(true);
+
+				case MethodType.Constructor:
+					return AccessTools.DeclaredConstructor(attr.declaringType, attr.argumentTypes);
+
+				case MethodType.StaticConstructor:
+					return AccessTools.GetDeclaredConstructors(attr.declaringType)
+						.Where(c => c.IsStatic)
+						.FirstOrDefault();
+			}
+
+			return null;
 		}
 
 		T RunMethod<S, T>(T defaultIfNotExisting, params object[] parameters)

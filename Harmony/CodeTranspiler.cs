@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System;
 using System.Collections;
+using System.Diagnostics;
 
 namespace Harmony
 {
@@ -25,32 +26,33 @@ namespace Harmony
 			transpilers.Add(transpiler);
 		}
 
+		[UpgradeToLatestVersion(1)]
 		public static object ConvertInstruction(Type type, object op, out Dictionary<string, object> unassigned)
 		{
-			var elementTo = Activator.CreateInstance(type, new object[] { OpCodes.Nop, null });
 			var nonExisting = new Dictionary<string, object>();
-			Traverse.IterateFields(op, elementTo, (name, trvFrom, trvDest) =>
+			var elementTo = AccessTools.MakeDeepCopy(op, type, (namePath, trvSrc, trvDest) =>
 			{
-				var val = trvFrom.GetValue();
+				var value = trvSrc.GetValue();
 
 				if (trvDest.FieldExists() == false)
 				{
-					nonExisting[name] = val;
-					return;
+					nonExisting[namePath] = value;
+					return null;
 				}
 
-				// TODO - improve the logic here. for now, we replace all short jumps
-				//        with long jumps regardless of how far the jump is
-				//
-				if (name == nameof(CodeInstruction.opcode))
-					val = ReplaceShortJumps((OpCode)val);
+				if (namePath == nameof(CodeInstruction.opcode))
+					return ReplaceShortJumps((OpCode)value);
 
-				trvDest.SetValue(val);
+				return value;
 			});
 			unassigned = nonExisting;
 			return elementTo;
 		}
 
+		// ShouldAddExceptionInfo is used to determine if CodeInstructions from an older Harmony version were duplicating
+		// exception information as well as to preserve the exception information from being dropped when piping through
+		// multiple transpilers with mixed Harmony versions.
+		//
 		public static bool ShouldAddExceptionInfo(object op, int opIndex, List<object> originalInstructions, List<object> newInstructions, Dictionary<object, Dictionary<string, object>> unassignedValues)
 		{
 			var originalIndex = originalInstructions.IndexOf(op);
@@ -172,18 +174,36 @@ namespace Harmony
 			return list as IEnumerable;
 		}
 
-		public static IEnumerable<CodeInstruction> ConvertToOurInstructions(IEnumerable instructions, List<object> originalInstructions, Dictionary<object, Dictionary<string, object>> unassignedValues)
+		[UpgradeToLatestVersion(1)]
+		public static IEnumerable ConvertToOurInstructions(IEnumerable instructions, List<object> originalInstructions, Dictionary<object, Dictionary<string, object>> unassignedValues)
 		{
-			var result = new List<CodeInstruction>();
+			// Since we are patching this method, we cannot use typeof(CodeInstruction)
+			// because that would use the CodeInstruction of the Harmony lib that patches
+			// us and we get a type assignment error.
+			// Instead, we know that our caller returns List<X> where X is the type we need
+			//
+			var codeInstructionType = new StackTrace().GetFrames()
+				.Select(frame => frame.GetMethod())
+				.OfType<MethodInfo>()
+				.Select(method =>
+				{
+					var returnType = method.ReturnType;
+					if (returnType.IsGenericType == false) return null;
+					var listTypes = returnType.GetGenericArguments();
+					if (listTypes.Length != 1) return null;
+					var type = listTypes[0];
+					return type.FullName == typeof(CodeInstruction).FullName ? type : null;
+				})
+				.Where(type => type != null)
+				.First();
+
 			var newInstructions = instructions.Cast<object>().ToList();
 
 			var index = -1;
 			foreach (var op in newInstructions)
 			{
 				index++;
-
-				var elementTo = new CodeInstruction(OpCodes.Nop, null);
-				Traverse.IterateFields(op, elementTo, (trvFrom, trvDest) => trvDest.SetValue(trvFrom.GetValue()));
+				var elementTo = AccessTools.MakeDeepCopy(op, codeInstructionType);
 				if (unassignedValues.TryGetValue(op, out var fields))
 				{
 					var addExceptionInfo = ShouldAddExceptionInfo(op, index, originalInstructions, newInstructions, unassignedValues);

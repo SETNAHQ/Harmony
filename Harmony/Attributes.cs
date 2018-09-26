@@ -1,12 +1,30 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
 
 namespace Harmony
 {
+	public enum MethodType
+	{
+		Normal,
+		Getter,
+		Setter,
+		Constructor,
+		StaticConstructor
+	}
+
+	[Obsolete("This enum will be removed in the next major version. To define special methods, use MethodType")]
 	public enum PropertyMethod
 	{
 		Getter,
 		Setter
+	}
+
+	public enum ArgumentType
+	{
+		Normal,
+		Ref,
+		Out,
+		Pointer
 	}
 
 	public enum HarmonyPatchType
@@ -22,45 +40,170 @@ namespace Harmony
 		public HarmonyMethod info = new HarmonyMethod();
 	}
 
-	[AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+	[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 	public class HarmonyPatch : HarmonyAttribute
 	{
+		// no argument (for use with TargetMethod)
+
 		public HarmonyPatch()
 		{
 		}
 
-		public HarmonyPatch(Type type)
+		// starting with 'Type'
+
+		public HarmonyPatch(Type declaringType)
 		{
-			info.originalType = type;
+			info.declaringType = declaringType;
 		}
+
+		public HarmonyPatch(Type declaringType, Type[] argumentTypes)
+		{
+			info.declaringType = declaringType;
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(Type declaringType, string methodName)
+		{
+			info.declaringType = declaringType;
+			info.methodName = methodName;
+		}
+
+		public HarmonyPatch(Type declaringType, string methodName, params Type[] argumentTypes)
+		{
+			info.declaringType = declaringType;
+			info.methodName = methodName;
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(Type declaringType, string methodName, Type[] argumentTypes, ArgumentType[] argumentVariations)
+		{
+			info.declaringType = declaringType;
+			info.methodName = methodName;
+			ParseSpecialArguments(argumentTypes, argumentVariations);
+		}
+
+		public HarmonyPatch(Type declaringType, MethodType methodType)
+		{
+			info.declaringType = declaringType;
+			info.methodType = methodType;
+		}
+
+		public HarmonyPatch(Type declaringType, MethodType methodType, params Type[] argumentTypes)
+		{
+			info.declaringType = declaringType;
+			info.methodType = methodType;
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(Type declaringType, MethodType methodType, Type[] argumentTypes, ArgumentType[] argumentVariations)
+		{
+			info.declaringType = declaringType;
+			info.methodType = methodType;
+			ParseSpecialArguments(argumentTypes, argumentVariations);
+		}
+
+		public HarmonyPatch(Type declaringType, string propertyName, MethodType methodType)
+		{
+			info.declaringType = declaringType;
+			info.methodName = propertyName;
+			info.methodType = methodType;
+		}
+
+		// starting with 'string'
 
 		public HarmonyPatch(string methodName)
 		{
 			info.methodName = methodName;
 		}
 
+		public HarmonyPatch(string methodName, params Type[] argumentTypes)
+		{
+			info.methodName = methodName;
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(string methodName, Type[] argumentTypes, ArgumentType[] argumentVariations)
+		{
+			info.methodName = methodName;
+			ParseSpecialArguments(argumentTypes, argumentVariations);
+		}
+
+		public HarmonyPatch(string propertyName, MethodType methodType)
+		{
+			info.methodName = propertyName;
+			info.methodType = methodType;
+		}
+
+		// starting with 'MethodType'
+
+		public HarmonyPatch(MethodType methodType)
+		{
+			info.methodType = methodType;
+		}
+
+		public HarmonyPatch(MethodType methodType, params Type[] argumentTypes)
+		{
+			info.methodType = methodType;
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(MethodType methodType, Type[] argumentTypes, ArgumentType[] argumentVariations)
+		{
+			info.methodType = methodType;
+			ParseSpecialArguments(argumentTypes, argumentVariations);
+		}
+
+		// starting with 'Type[]'
+
+		public HarmonyPatch(Type[] argumentTypes)
+		{
+			info.argumentTypes = argumentTypes;
+		}
+
+		public HarmonyPatch(Type[] argumentTypes, ArgumentType[] argumentVariations)
+		{
+			ParseSpecialArguments(argumentTypes, argumentVariations);
+		}
+
+		// Obsolete attributes
+
+		[Obsolete("This attribute will be removed in the next major version. Use HarmonyPatch together with MethodType.Getter or MethodType.Setter instead")]
 		public HarmonyPatch(string propertyName, PropertyMethod type)
 		{
-			var prefix = type == PropertyMethod.Getter ? "get_" : "set_";
-			info.methodName = prefix + propertyName;
+			info.methodName = propertyName;
+			info.methodType = type == PropertyMethod.Getter ? MethodType.Getter : MethodType.Setter;
 		}
 
-		public HarmonyPatch(Type[] parameter)
-		{
-			info.parameter = parameter;
-		}
+		//
 
-		public HarmonyPatch(Type type, string methodName, Type[] parameter = null)
+		private void ParseSpecialArguments(Type[] argumentTypes, ArgumentType[] argumentVariations)
 		{
-			info.originalType = type;
-			info.methodName = methodName;
-			info.parameter = parameter;
-		}
+			if (argumentVariations == null || argumentVariations.Length == 0)
+			{
+				info.argumentTypes = argumentTypes;
+				return;
+			}
 
-		public HarmonyPatch(Type type, Type[] parameter = null)
-		{
-			info.originalType = type;
-			info.parameter = parameter;
+			if (argumentTypes.Length < argumentVariations.Length)
+				throw new ArgumentException("argumentVariations contains more elements than argumentTypes", nameof(argumentVariations));
+
+			var types = new List<Type>();
+			for (var i = 0; i < argumentTypes.Length; i++)
+			{
+				var type = argumentTypes[i];
+				switch (argumentVariations[i])
+				{
+					case ArgumentType.Ref:
+					case ArgumentType.Out:
+						type = type.MakeByRefType();
+						break;
+					case ArgumentType.Pointer:
+						type = type.MakePointerType();
+						break;
+				}
+				types.Add(type);
+			}
+			info.argumentTypes = types.ToArray();
 		}
 	}
 
@@ -138,25 +281,38 @@ namespace Harmony
 	}
 
 	[AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true)]
-	public class HarmonyParameter : Attribute
+	public class HarmonyArgument : Attribute
 	{
 		public string OriginalName { get; private set; }
+		public int Index { get; private set; }
 		public string NewName { get; private set; }
 
-		public HarmonyParameter(string originalName) : this(originalName, null)
+		public HarmonyArgument(string originalName) : this(originalName, null)
 		{
 		}
 
-		public HarmonyParameter(string originalName, string newName)
+		public HarmonyArgument(int index) : this(index, null)
+		{
+		}
+
+		public HarmonyArgument(string originalName, string newName)
 		{
 			OriginalName = originalName;
+			Index = -1;
 			NewName = newName;
+		}
+
+		public HarmonyArgument(int index, string name)
+		{
+			OriginalName = null;
+			Index = index;
+			NewName = name;
 		}
 	}
 
 	// This attribute is for Harmony patching itself to the latest
 	//
-	[AttributeUsage(AttributeTargets.Method)]
+	[AttributeUsage(AttributeTargets.Method | AttributeTargets.Constructor)]
 	internal class UpgradeToLatestVersion : Attribute
 	{
 		public int version;

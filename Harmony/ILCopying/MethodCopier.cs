@@ -52,12 +52,14 @@ namespace Harmony.ILCopying
 		// NOTE: you cannot simply "copy" ILInstructions from a method. They contain references to
 		// local variables which must be CREATED on an ILGenerator or else they are invalid when you
 		// want to use the ILInstruction. If you are really clever, you can supply a dummy generator
-		// and edit out all labels during the processing but that might be more tricky than you think.
+		// and edit out all labels during the processing but that might be more trickier than you think
 		//
-		// In order to copy together a bunch of method parts within a transpiler, you either have to
-		// accep that by passing the generator that will build your new method, you will end up with
-		// the sum of all declared local variables of all methods you query with GetInstructions or
-		// you tricks around with fake generators (not recommended)
+		// In order to copy together a bunch of method parts within a transpiler, you have to pass in
+		// your current generator that builds your new method
+		//
+		// You will end up with the sum of all declared local variables of all methods you run
+		// GetInstructions on or use a dummy generator but edit out the invalid labels from the codes
+		// you copy
 		//
 		public static List<ILInstruction> GetInstructions(ILGenerator generator, MethodBase method)
 		{
@@ -173,17 +175,6 @@ namespace Harmony.ILCopying
 
 				var handler_start = exception.HandlerOffset;
 				var handler_end = exception.HandlerOffset + exception.HandlerLength - 1;
-
-				var clauseName = exception.Flags == ExceptionHandlingClauseOptions.Clause ? "catch" : exception.Flags.ToString().ToLower();
-
-				//FileLog.Log("METHOD " + method.DeclaringType.Name + "." + method.Name + "()");
-				//FileLog.Log("- EXCEPTION BLOCK:");
-				//FileLog.Log("  - try: " + string.Format("{0} + {1} = L_{0:x4} - L_{1:x4}", exception.TryOffset, exception.TryLength, try_start, try_end));
-				//FileLog.Log("  - " + clauseName + ": " + string.Format("{0} + {1} = L_{0:x4} - L_{1:x4}", exception.HandlerOffset, exception.HandlerLength, handler_start, handler_end));
-				//if (exception.Flags == ExceptionHandlingClauseOptions.Filter)
-				//	FileLog.Log("    Filter Offset: " + exception.FilterOffset);
-				//if (exception.Flags != ExceptionHandlingClauseOptions.Filter && exception.Flags != ExceptionHandlingClauseOptions.Finally)
-				//	FileLog.Log("    Exception Type: " + exception.CatchType);
 
 				var instr1 = GetInstruction(try_start, false);
 				instr1.blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock, null));

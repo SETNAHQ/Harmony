@@ -15,6 +15,7 @@ namespace Harmony
 		public static string ORIGINAL_METHOD_PARAM = "__originalMethod";
 		public static string RESULT_VAR = "__result";
 		public static string STATE_VAR = "__state";
+		public static string PARAM_INDEX_PREFIX = "__";
 		public static string INSTANCE_FIELD_PREFIX = "___";
 
 		// in case of trouble, set to true to write dynamic method to desktop as a dll
@@ -27,11 +28,14 @@ namespace Harmony
 		[UpgradeToLatestVersion(1)]
 		public static DynamicMethod CreatePatchedMethod(MethodBase original, List<MethodInfo> prefixes, List<MethodInfo> postfixes, List<MethodInfo> transpilers)
 		{
-			return CreatePatchedMethod(original, "HARMONY_PATCH_1.1.0", prefixes, postfixes, transpilers);
+			return CreatePatchedMethod(original, "HARMONY_PATCH_1.1.1", prefixes, postfixes, transpilers);
 		}
 
 		public static DynamicMethod CreatePatchedMethod(MethodBase original, string harmonyInstanceID, List<MethodInfo> prefixes, List<MethodInfo> postfixes, List<MethodInfo> transpilers)
 		{
+			if (original == null)
+				throw new ArgumentNullException(nameof(original), "Original method is null. Did you specify it correctly?");
+
 			try
 			{
 				if (HarmonyInstance.DEBUG) FileLog.LogBuffered("### Patch " + original.DeclaringType + ", " + original);
@@ -118,7 +122,10 @@ namespace Harmony
 			}
 			catch (Exception ex)
 			{
-				throw new Exception("Exception from HarmonyInstance \"" + harmonyInstanceID + "\"", ex);
+				var exceptionString = "Exception from HarmonyInstance \"" + harmonyInstanceID + "\" patching " + original.FullDescription();
+				if (HarmonyInstance.DEBUG)
+					FileLog.Log("Exception: " + exceptionString);
+				throw new Exception(exceptionString, ex);
 			}
 			finally
 			{
@@ -147,49 +154,81 @@ namespace Harmony
 			return OpCodes.Ldind_Ref;
 		}
 
-		static HarmonyParameter GetParameterAttribute(this ParameterInfo parameter)
+		static HarmonyArgument GetArgumentAttribute(this ParameterInfo parameter)
 		{
-			return parameter.GetCustomAttributes(false).FirstOrDefault(attr => attr is HarmonyParameter) as HarmonyParameter;
+			return parameter.GetCustomAttributes(false).FirstOrDefault(attr => attr is HarmonyArgument) as HarmonyArgument;
 		}
 
-		static HarmonyParameter[] GetParameterAttributes(this MethodInfo method)
+		static HarmonyArgument[] GetArgumentAttributes(this MethodInfo method)
 		{
-			return method.GetCustomAttributes(false).Where(attr => attr is HarmonyParameter).Cast<HarmonyParameter>().ToArray();
+			return method.GetCustomAttributes(false).Where(attr => attr is HarmonyArgument).Cast<HarmonyArgument>().ToArray();
 		}
 
-		static HarmonyParameter[] GetParameterAttributes(this Type type)
+		static HarmonyArgument[] GetArgumentAttributes(this Type type)
 		{
-			return type.GetCustomAttributes(false).Where(attr => attr is HarmonyParameter).Cast<HarmonyParameter>().ToArray();
+			return type.GetCustomAttributes(false).Where(attr => attr is HarmonyArgument).Cast<HarmonyArgument>().ToArray();
 		}
 
-		static string GetParameterOverride(this ParameterInfo parameter)
+		static string GetOriginalArgumentName(this ParameterInfo parameter, string[] originalParameterNames)
 		{
-			var paramAttr = parameter.GetParameterAttribute();
-			if (paramAttr != null && !string.IsNullOrEmpty(paramAttr.OriginalName))
-				return paramAttr.OriginalName;
+			var attribute = parameter.GetArgumentAttribute();
+			if (attribute == null)
+				return null;
+
+			if (string.IsNullOrEmpty(attribute.OriginalName) == false)
+				return attribute.OriginalName;
+
+			if (attribute.Index >= 0 && attribute.Index < originalParameterNames.Length)
+				return originalParameterNames[attribute.Index];
 
 			return null;
 		}
 
-		static string GetParameterOverride(HarmonyParameter[] patchAttributes, string name)
+		static string GetOriginalArgumentName(HarmonyArgument[] attributes, string name, string[] originalParameterNames)
 		{
-			if (patchAttributes.Length > 0)
-			{
-				var paramAttr = patchAttributes.SingleOrDefault(p => p.NewName == name);
-				if (paramAttr != null && !string.IsNullOrEmpty(paramAttr.OriginalName))
-					return paramAttr.OriginalName;
-			}
+			if (attributes.Length <= 0)
+				return null;
+
+			var attribute = attributes.SingleOrDefault(p => p.NewName == name);
+			if (attribute == null)
+				return null;
+
+			if (string.IsNullOrEmpty(attribute.OriginalName) == false)
+				return attribute.OriginalName;
+
+			if (attribute.Index >= 0 && attribute.Index < originalParameterNames.Length)
+				return originalParameterNames[attribute.Index];
 
 			return null;
 		}
 
-		static string GetParameterOverride(this MethodInfo method, string name, bool checkClass)
+		static string GetOriginalArgumentName(this MethodInfo method, string[] originalParameterNames, string name)
 		{
-			var customParam = GetParameterOverride(method.GetParameterAttributes(), name);
-			if (customParam == null && checkClass)
-				return GetParameterOverride(method.DeclaringType.GetParameterAttributes(), name);
+			string argumentName;
 
-			return customParam;
+			argumentName = GetOriginalArgumentName(method.GetArgumentAttributes(), name, originalParameterNames);
+			if (argumentName != null)
+				return argumentName;
+
+			argumentName = GetOriginalArgumentName(method.DeclaringType.GetArgumentAttributes(), name, originalParameterNames);
+			if (argumentName != null)
+				return argumentName;
+
+			return name;
+		}
+
+		private static int GetArgumentIndex(MethodInfo patch, string[] originalParameterNames, ParameterInfo patchParam)
+		{
+			var originalName = patchParam.GetOriginalArgumentName(originalParameterNames);
+			if (originalName != null)
+				return Array.IndexOf(originalParameterNames, originalName);
+
+			var patchParamName = patchParam.Name;
+			originalName = patch.GetOriginalArgumentName(originalParameterNames, patchParamName);
+			if (originalName != null)
+				return Array.IndexOf(originalParameterNames, originalName);
+
+			return -1;
 		}
 
 		static MethodInfo getMethodMethod = typeof(MethodBase).GetMethod("GetMethodFromHandle", new[] { typeof(RuntimeMethodHandle) });
@@ -240,7 +279,21 @@ namespace Harmony
 
 				if (patchParam.Name.StartsWith(INSTANCE_FIELD_PREFIX))
 				{
-					var fieldInfo = AccessTools.Field(original.DeclaringType, patchParam.Name.Substring(INSTANCE_FIELD_PREFIX.Length));
+					var fieldName = patchParam.Name.Substring(INSTANCE_FIELD_PREFIX.Length);
+					FieldInfo fieldInfo;
+					if (fieldName.All(char.IsDigit))
+					{
+						fieldInfo = AccessTools.Field(original.DeclaringType, int.Parse(fieldName));
+						if (fieldInfo == null)
+							throw new ArgumentException("No field found at given index in class " + original.DeclaringType.FullName, fieldName);
+					}
+					else
+					{
+						fieldInfo = AccessTools.Field(original.DeclaringType, fieldName);
+						if (fieldInfo == null)
+							throw new ArgumentException("No such field defined in class " + original.DeclaringType.FullName, fieldName);
+					}
+
 					if (fieldInfo.IsStatic)
 					{
 						if (patchParam.ParameterType.IsByRef)
@@ -280,22 +333,20 @@ namespace Harmony
 					continue;
 				}
 
-				var patchParamName = patchParam.Name;
-
-				var originalName = patchParam.GetParameterOverride();
-				if (originalName != null)
+				int idx;
+				if (patchParam.Name.StartsWith(PARAM_INDEX_PREFIX))
 				{
-					patchParamName = originalName;
+					var val = patchParam.Name.Substring(PARAM_INDEX_PREFIX.Length);
+					if (!int.TryParse(val, out idx))
+						throw new Exception("Parameter " + patchParam.Name + " does not contain a valid index");
+					if (idx < 0 || idx >= originalParameters.Length)
+						throw new Exception("No parameter found at index " + idx);
 				}
 				else
 				{
-					originalName = patch.GetParameterOverride(patchParamName, true);
-					if (originalName != null)
-						patchParamName = originalName;
+					idx = GetArgumentIndex(patch, originalParameterNames, patchParam);
+					if (idx == -1) throw new Exception("Parameter \"" + patchParam.Name + "\" not found in method " + original.FullDescription());
 				}
-
-				var idx = Array.IndexOf(originalParameterNames, patchParamName);
-				if (idx == -1) throw new Exception("Parameter \"" + patchParam.Name + "\" not found in method " + original.FullDescription());
 
 				//   original -> patch     opcode
 				// --------------------------------------

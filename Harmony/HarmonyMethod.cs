@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -10,9 +10,10 @@ namespace Harmony
 	{
 		public MethodInfo method; // need to be called 'method'
 
-		public Type originalType;
+		public Type declaringType;
 		public string methodName;
-		public Type[] parameter;
+		public MethodType? methodType;
+		public Type[] argumentTypes;
 		public int prioritiy = -1;
 		public string[] before;
 		public string[] after;
@@ -67,6 +68,17 @@ namespace Harmony
 				});
 			});
 			return result;
+		}
+
+		public override string ToString()
+		{
+			var result = "HarmonyMethod[";
+			var trv = Traverse.Create(this);
+			HarmonyFields().ForEach(f =>
+			{
+				result += f + '=' + trv.Field(f).GetValue();
+			});
+			return result + "]";
 		}
 	}
 

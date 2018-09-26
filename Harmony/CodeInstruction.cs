@@ -18,11 +18,44 @@ namespace Harmony
 			this.operand = operand;
 		}
 
+		// full copy (be careful with duplicate labels and exception blocks!)
+		// for normal cases, use Clone()
+		//
 		public CodeInstruction(CodeInstruction instruction)
 		{
 			opcode = instruction.opcode;
 			operand = instruction.operand;
 			labels = instruction.labels.ToArray().ToList();
+			blocks = instruction.blocks.ToArray().ToList();
+		}
+
+		// copy only opcode and operand
+		//
+		public CodeInstruction Clone()
+		{
+			return new CodeInstruction(this)
+			{
+				labels = new List<Label>(),
+				blocks = new List<ExceptionBlock>()
+			};
+		}
+
+		// copy only operand, use new opcode
+		//
+		public CodeInstruction Clone(OpCode opcode)
+		{
+			var instruction = Clone();
+			instruction.opcode = opcode;
+			return instruction;
+		}
+
+		// copy only opcode, use new operand
+		//
+		public CodeInstruction Clone(object operand)
+		{
+			var instruction = Clone();
+			instruction.operand = operand;
+			return instruction;
 		}
 
 		public override string ToString()
@@ -36,7 +69,7 @@ namespace Harmony
 			var extras = list.Count > 0 ? " [" + string.Join(", ", list.ToArray()) + "]" : "";
 			var operandStr = Emitter.FormatArgument(operand);
 			if (operandStr != "") operandStr = " " + operandStr;
-			return string.Format(opcode + operandStr + extras);
+			return opcode + operandStr + extras;
 		}
 	}
 }

@@ -22,7 +22,7 @@ namespace Harmony
 				var result = new HashSet<string>();
 				result.UnionWith(Prefixes.Select(p => p.owner));
 				result.UnionWith(Postfixes.Select(p => p.owner));
-				result.UnionWith(Postfixes.Select(p => p.owner));
+				result.UnionWith(Transpilers.Select(p => p.owner));
 				return result.ToList().AsReadOnly();
 			}
 		}
@@ -45,16 +45,50 @@ namespace Harmony
 		public string Id => id;
 		public static bool DEBUG = false;
 
+		private static bool selfPatchingDone = false;
+
 		HarmonyInstance(string id)
 		{
+			if (DEBUG)
+			{
+				var assembly = typeof(HarmonyInstance).Assembly;
+				var version = assembly.GetName().Version;
+				var location = assembly.Location;
+				if (location == null || location == "") location = new Uri(assembly.CodeBase).LocalPath;
+				FileLog.Log("### Harmony id=" + id + ", version=" + version + ", location=" + location);
+				var callingMethod = GetOutsideCaller();
+				var callingAssembly = callingMethod.DeclaringType.Assembly;
+				location = callingAssembly.Location;
+				if (location == null || location == "") location = new Uri(callingAssembly.CodeBase).LocalPath;
+				FileLog.Log("### Started from " + callingMethod.FullDescription() + ", location " + location);
+				FileLog.Log("### At " + DateTime.Now.ToString("yyyy-MM-dd hh.mm.ss"));
+			}
+
 			this.id = id;
-			SelfPatching.PatchOldHarmonyMethods();
+
+			if (!selfPatchingDone)
+			{
+				selfPatchingDone = true;
+				SelfPatching.PatchOldHarmonyMethods();
+			}
 		}
 
 		public static HarmonyInstance Create(string id)
 		{
 			if (id == null) throw new Exception("id cannot be null");
 			return new HarmonyInstance(id);
+		}
+
+		private MethodBase GetOutsideCaller()
+		{
+			var trace = new StackTrace(true);
+			foreach (var frame in trace.GetFrames())
+			{
+				var method = frame.GetMethod();
+				if (method.DeclaringType.Namespace != typeof(HarmonyInstance).Namespace)
+					return method;
+			}
+			throw new Exception("Unexpected end of stack trace");
 		}
 
 		//
@@ -80,25 +114,46 @@ namespace Harmony
 			});
 		}
 
-		public DynamicMethod Patch(MethodBase original, HarmonyMethod prefix, HarmonyMethod postfix, HarmonyMethod transpiler = null)
+		public DynamicMethod Patch(MethodBase original, HarmonyMethod prefix = null, HarmonyMethod postfix = null, HarmonyMethod transpiler = null)
 		{
 			var processor = new PatchProcessor(this, new List<MethodBase> { original }, prefix, postfix, transpiler);
 			return processor.Patch().FirstOrDefault();
 		}
 
-		public void RemovePatch(MethodBase original, HarmonyPatchType type, string harmonyID = null)
+		public void UnpatchAll(string harmonyID = null)
+		{
+			bool IDCheck(Patch patchInfo) => harmonyID == null || patchInfo.owner == harmonyID;
+
+			var originals = GetPatchedMethods().ToList();
+			foreach (var original in originals)
+			{
+				var info = GetPatchInfo(original);
+				info.Prefixes.DoIf(IDCheck, patchInfo => Unpatch(original, patchInfo.patch));
+				info.Postfixes.DoIf(IDCheck, patchInfo => Unpatch(original, patchInfo.patch));
+				info.Transpilers.DoIf(IDCheck, patchInfo => Unpatch(original, patchInfo.patch));
+			}
+		}
+
+		public void Unpatch(MethodBase original, HarmonyPatchType type, string harmonyID = null)
 		{
 			var processor = new PatchProcessor(this, new List<MethodBase> { original });
 			processor.Unpatch(type, harmonyID);
 		}
 
-		public void RemovePatch(MethodBase original, MethodInfo patch)
+		public void Unpatch(MethodBase original, MethodInfo patch)
 		{
 			var processor = new PatchProcessor(this, new List<MethodBase> { original });
 			processor.Unpatch(patch);
 		}
 
 		//
+
+		public bool HasAnyPatches(string harmonyID)
+		{
+			return GetPatchedMethods()
+				.Select(original => GetPatchInfo(original))
+				.Any(info => info.Owners.Contains(harmonyID));
+		}
 
 		public Patches GetPatchInfo(MethodBase method)
 		{
@@ -112,7 +167,7 @@ namespace Harmony
 
 		public Dictionary<string, Version> VersionInfo(out Version currentVersion)
 		{
-			currentVersion = Assembly.GetExecutingAssembly().GetName().Version;
+			currentVersion = typeof(HarmonyInstance).Assembly.GetName().Version;
 			var assemblies = new Dictionary<string, Assembly>();
 			GetPatchedMethods().Do(method =>
 			{
